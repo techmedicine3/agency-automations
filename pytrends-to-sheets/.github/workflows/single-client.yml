@@ -1,0 +1,48 @@
+Paste this YAML and Commit to main:
+
+name: Pytrends → Google Sheets (Single Client)
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r pytrends-to-sheets/requirements.txt
+
+      # Write the JSON secret to a file safely
+      - name: Write creds
+        run: |
+          printf '%s' "${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}" > credentials.json
+
+      # (optional) validate JSON to catch paste errors early
+      - name: Validate credentials.json
+        run: |
+          python - << 'PY'
+          import json
+          json.load(open('credentials.json','r',encoding='utf-8'))
+          print("credentials.json is valid JSON")
+          PY
+
+      - name: Run
+        env:
+          SHEET_ID: ${{ secrets.SHEET_ID }}
+          DAILY_PN: canada
+          REALTIME_PN: CA
+          REALTIME_CAT: all
+          REALTIME_COUNT: 20
+          TZ_OFFSET_MIN: "0"
+        run: |
+          python pytrends-to-sheets/main.py
