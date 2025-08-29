@@ -1,63 +1,60 @@
-name: Weekly Reports (clients.csv)
-    on:
-      workflow_dispatch: {}
-      schedule:
-        - cron: "0 12 * * MON"
-    jobs:
-      prepare:
-        runs-on: ubuntu-latest
-        outputs:
-          matrix: ${{ steps.mk.outputs.matrix }}
-        steps:
-          - uses: actions/checkout@v4
-          - id: mk
-            run: |
-              if [ ! -f clients.csv ]; then
-                echo 'matrix={"include":[]}' >> $GITHUB_OUTPUT
-                exit 0
-              fi
-              # Build a JSON matrix from clients.csv (slug,sheet_id)
-              tail -n +2 clients.csv | awk -F, 'NF>=2 {gsub(/\\r/,""); printf("{\"slug\":\"%s\",\"sheet\":\"%s\"}\n",$1,$2)}' > rows.jsonl
-              echo "Rows:"; cat rows.jsonl || true
-              python - << 'PY'
-import json, sys
-rows = []
-try:
-    with open("rows.jsonl","r",encoding="utf-8") as f:
-        for line in f:
-            line=line.strip()
-            if not line: continue
-            rows.append(json.loads(line))
-except FileNotFoundError:
-    pass
-print("Parsed:", rows)
-print(f"matrix={json.dumps({'include': rows})}")
-with open(os.environ['GITHUB_OUTPUT'],'a') as out:
-    out.write(f"matrix={json.dumps({'include': rows})}")
-PY
-      run:
-        needs: prepare
-        if: ${{ fromJson(needs.prepare.outputs.matrix).include && fromJson(needs.prepare.outputs.matrix).include[0] }}
-        runs-on: ubuntu-latest
-        strategy:
-          matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
-        steps:
-          - uses: actions/checkout@v4
-          - uses: actions/setup-python@v5
-            with:
-              python-version: '3.11'
-          - name: Install deps
-            run: |
-              python -m pip install --upgrade pip
-              pip install -r reports/requirements.txt
-          - name: Write creds
-            run: |
-              echo "${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}" > credentials.json
-          - name: Generate weekly report
-            run: |
-              python reports/build_weekly_report.py "${{ matrix.slug }}" "${{ matrix.sheet }}"
-          - name: Upload artifact
-            uses: actions/upload-artifact@v4
-            with:
-              name: weekly-reports
-              path: reports/*.md
+name: weekly-reports
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 12 * * MON"
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.mk.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: mk
+        run: |
+          if [ ! -f clients.csv ]; then
+            echo 'matrix={"include":[]}' >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          # Build JSON matrix from clients.csv
+          tail -n +2 clients.csv | awk -F, 'NF>=2 {gsub(/\r/,""); printf("{\"slug\":\"%s\",\"sheet\":\"%s\"}\n",$1,$2)}' > rows.jsonl
+          python - << 'PY'
+          import json, os
+          rows = []
+          with open("rows.jsonl","r",encoding="utf-8") as f:
+              for line in f:
+                  line=line.strip()
+                  if not line: continue
+                  rows.append(json.loads(line))
+          with open(os.environ['GITHUB_OUTPUT'],'a') as out:
+              out.write(f"matrix={json.dumps({'include': rows})}")
+          PY
+
+  run:
+    needs: prepare
+    if: ${{ fromJson(needs.prepare.outputs.matrix).include && fromJson(needs.prepare.outputs.matrix).include[0] }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r reports/requirements.txt
+      - name: Write creds
+        run: |
+          printf '%s' "${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}" > credentials.json
+      - name: Generate weekly report
+        run: |
+          python reports/build_weekly_report.py "${{ matrix.slug }}" "${{ matrix.sheet }}"
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: weekly-reports
+          path: reports/*.md
