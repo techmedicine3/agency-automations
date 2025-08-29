@@ -1,0 +1,60 @@
+name: Pytrends (Matrix)
+on:
+  schedule:
+    - cron: "0 13 * * *"
+  workflow_dispatch:
+    inputs:
+      environments_csv:
+        description: "Comma-separated GitHub Environment names (e.g., client-acme,client-zen)"
+        required: true
+jobs:
+  expand:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - id: set-matrix
+        run: |
+          IFS=',' read -ra ENVS <<< "${{ github.event.inputs.environments_csv }}"
+          json='{"include":['
+          sep=''
+          for e in "${ENVS[@]}"; do
+            trimmed=$(echo "$e" | xargs)
+            if [ -n "$trimmed" ]; then
+              json="$json$sep{\"environment\":\"$trimmed\"}"
+              sep=','
+            fi
+          done
+          json="$json]}"
+          echo "matrix=$json" >> $GITHUB_OUTPUT
+
+  run:
+    needs: expand
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: ${{ fromJson(needs.expand.outputs.matrix) }}
+    environment: ${{ matrix.environment }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r pytrends-to-sheets/requirements.txt
+      - name: Write creds
+        run: |
+          echo "${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}" > credentials.json
+      - name: Run
+        env:
+          SHEET_ID: ${{ secrets.SHEET_ID }}
+          DAILY_PN: canada
+          REALTIME_PN: CA
+          REALTIME_CAT: all
+          REALTIME_COUNT: 20
+          TZ_OFFSET_MIN: "0"
+        run: |
+          python pytrends-to-sheets/main.py

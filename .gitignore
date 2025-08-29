@@ -1,0 +1,7 @@
+__pycache__/
+.venv/
+.env
+credentials.json
+.idea/
+.vscode/
+reports/
